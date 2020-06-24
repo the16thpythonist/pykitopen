@@ -17,7 +17,7 @@ def unzip_bytes(content: bytes) -> TemporaryDirectory:
 
     temp_directory = TemporaryDirectory()
     with ZipFile(temp_file, mode='r') as zip_file:
-        zip_file.extractall(temp_directory.name())
+        zip_file.extractall(temp_directory.name)
 
     return temp_directory
 
