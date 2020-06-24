@@ -13,7 +13,7 @@ from pykitopen.mixins import DictTransformationMixin
 
 # INTERFACES AND ABSTRACT CLASSES
 # ###############################
-
+HELLO = 3
 
 class BatchingStrategy:
 
@@ -33,13 +33,9 @@ type:                   str
 """
 
 
-class SearchParametersBuilder:
+class SearchParametersBuilder(DictTransformationMixin):
 
-    TYPES_MAP: dict = {
-
-    }
-
-    DEFAULT_PARAMETERS = {
+    DEFAULT_PARAMETERS: dict = {
         'external_publications':                                'kit',
         'open_access_availability':                             'do_not_care',
         'full_text':                                            'do_not_care',
@@ -55,56 +51,63 @@ class SearchParametersBuilder:
         'publications':                                         'true'
     }
 
-    dict_transformation = {
+    dict_transformation: dict = {
         ('author',
          'authors'): {
-            str:                        'process_author_string',
+            str:                        'process_author_str',
             list:                       'process_author_list',
             object:                     'raise_type_error'
         },
         (('start', 'end'),
          'year'): {
             (str, str):                 'process_year_str',
-            (object, object):           'process_year_default'
+            (object, object):           'raise_type_error'
         },
-        ('type',
-         'type'): {
-            str:                        'process_type_int',
-            object:                     'process_type_default'
-        }
+        # ('type',
+        #  'type'): {
+        #     str:                        'process_type_str',
+        #     object:                     'raise_type_error'
+        # }
     }
 
     def __init__(self):
         self.options: Union[dict, None] = None
         self.parameters: Union[dict, None] = None
 
+    # PUBLIC METHODS
+    # --------------
+
     def set_options(self, options: dict):
         self.options = options
 
     def get_parameters(self):
-        assert self.options is not None
+        assert self.options is not None, 'options have to be supplied to build parameters!'
 
-        return self.DEFAULT_PARAMETERS.update({
-            'authors':              self._get_authors_value(),
-            'year':                 self._get_year_value()
-        })
+        parameters = self.DEFAULT_PARAMETERS.copy()
+        update = self.process(self.options)
+        parameters.update(update)
 
-    def process_author_string(self, key: str, value: str) -> str:
+        return parameters
+
+    def process_author_str(self, key: str, value: str) -> str:
         return value
 
     def process_author_list(self, key: str, value: List[str]) -> str:
         return self._join_author_list(value)
 
-    def process_year_int(self, keys: Tuple[str, str], values: Tuple[int, int]) -> str:
+    def process_year_str(self, keys: Tuple[str, str], values: Tuple[int, int]) -> str:
         start, end = values
-
-        self._assert_valid_year(start)
-        self._assert_valid_year(end)
 
         return f'{start}-{end}'
 
+    def process_type_str(self, key, value):
+        return ''
+
     def raise_type_error(self, key: str, value: Any):
         raise TypeError(f'Key "{key}" is not supposed to be type "{type(value)}"')
+
+    # PROTECTED_METHODS
+    # -----------------
 
     @classmethod
     def _join_author_list(cls, authors: List[str]) -> str:
@@ -112,7 +115,7 @@ class SearchParametersBuilder:
 
     @classmethod
     def _assert_valid_year(cls, year: Any):
-        assert (isinstance(year, int)), "year value must be int!"
+        assert (isinstance(year, str)), "year value must be int!"
         assert (1800 <= year <= 2020), "year value must be a valid int between 1800 and 2020"
 
 
@@ -132,10 +135,14 @@ class SearchBatch:
         self.length = 0
         self.index = 0
 
+    # PUBLIC METHODS
+    # --------------
+
     def execute(self):
         self.response = self.send_request()
         if self.response.status_code == 200:
-            publications_file_path = self._unzip_publications_file(self.response.content)
+            temp_dir: TemporaryDirectory = unzip_bytes(self.response.content)
+            publications_file_path: str = os.path.join(temp_dir.name, self.PUBLICATIONS_FILE_NAME)
             publications_rows = csv_as_dict_list(publications_file_path)
 
             self.publications = self._get_publications_from_rows(publications_rows)#
@@ -156,6 +163,22 @@ class SearchBatch:
         self.parameter_builder.set_options(self.options)
         return self.parameter_builder.get_parameters()
 
+    # PROTECTED METHODS
+    # -----------------
+
+    @classmethod
+    def _get_publications_from_rows(cls, rows: List[dict]) -> List[Publication]:
+        publications = []
+
+        for row in rows:
+            _publication = publication_from_row(row)
+            publications.append(_publication)
+
+        return publications
+
+    # MAGIC METHODS
+    # -------------
+
     def __len__(self) -> int:
         return self.length
 
@@ -170,22 +193,6 @@ class SearchBatch:
             raise StopIteration
 
         return publication
-
-    @classmethod
-    def _unzip_publications_file(cls, zip_content: bytes) -> str:
-        temp_dir: TemporaryDirectory = unzip_bytes(zip_content)
-        file_path: str = os.path.join(temp_dir.name(), cls.PUBLICATIONS_FILE_NAME)
-        return file_path
-
-    @classmethod
-    def _get_publications_from_rows(cls, rows: List[dict]) -> List[Publication]:
-        publications = []
-
-        for row in rows:
-            _publication = publication_from_row(row)
-            publications.append(_publication)
-
-        return publications
 
 
 class SearchResult:
