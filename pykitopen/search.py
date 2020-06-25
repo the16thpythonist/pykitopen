@@ -1,36 +1,95 @@
 import os
 import csv
 import json
-from typing import Tuple, Type, List, Union, Any
+import datetime
+
+from collections import deque
+from typing import Tuple, Type, List, Union, Any, Dict
 
 import requests
 from tempfile import TemporaryDirectory, TemporaryFile
 from zipfile import ZipFile
 
-from pykitopen.publication import Publication, publication_from_row
+from pykitopen.publication import Publication, PublicationView, publication_from_row
 from pykitopen.util import csv_as_dict_list, unzip_bytes
 from pykitopen.mixins import DictTransformationMixin
 
 # INTERFACES AND ABSTRACT CLASSES
 # ###############################
-HELLO = 3
+
 
 class BatchingStrategy:
 
-    def __init__(self, options: dict):
+    def __init__(self, config, options):
         self.options = options
+        self.config = config
 
-    def __call__(self, options: dict):
+    def __call__(self):
         raise NotImplementedError()
 
 
-"""
-contents of options dict:
-author:                 list, str
-start:                  int, None
-end:                    int, None
-type:                   str
-"""
+class SearchOptions:
+
+    _ARGS = ['author', 'start', 'end', 'view']
+
+    _DEFAULT_CONFIG = {
+        'default_view':         Publication.VIEWS.BASIC,
+        'default_start':        '2000',
+        'default_end':          '',
+        'default_author':       'MUSTERMANN, M*'
+    }
+
+    def __init__(self,
+                 author: Union[List[str], str],
+                 start: str,
+                 end: str,
+                 view: PublicationView):
+        self.author = author
+        self.start = start
+        self.end = end
+        self.view = view
+
+        self.parameters_builder = SearchParametersBuilder()
+        self.parameters_builder.set_options(self.to_dict())
+
+    # PUBLIC METHODS
+    # --------------
+
+    def to_parameters(self):
+        return self.parameters_builder.get_parameters()
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'author':       self.author,
+            'start':        self.start,
+            'end':          self.end,
+            'view':         self.view
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict, config: dict = _DEFAULT_CONFIG):
+        kwargs = {}
+        for key in cls._ARGS:
+            default_key = f'default_{key}'
+            kwargs[key] = data[key] if key in data.keys() else config[default_key]
+        return SearchOptions(**kwargs)
+
+    # PROTECTED METHODS
+    # -----------------
+
+    # MAGIC METHODS
+    # -------------
+
+    def __dict__(self) -> dict:
+        return self.to_dict()
+
+    def __str__(self) -> str:
+        return 'SearchOptions(author="{}", start="{}", end="{}", view={})'.format(
+            self.author,
+            self.start,
+            self.end,
+            self.view
+        )
 
 
 class SearchParametersBuilder(DictTransformationMixin):
@@ -46,7 +105,7 @@ class SearchParametersBuilder(DictTransformationMixin):
         'row':                                                  'type',
         'column':                                               'year',
         'authors':                                              'MUSTERMANN',
-        'table_fields':                                         'author',
+        'table_fields':                                         'title',
         'format':                                               'csv',
         'publications':                                         'true'
     }
@@ -63,6 +122,10 @@ class SearchParametersBuilder(DictTransformationMixin):
             (str, str):                 'process_year_str',
             (object, object):           'raise_type_error'
         },
+        ('view', 'table_fields'): {
+            PublicationView:            'process_view',
+            object:                     'raise_type_error'
+        }
         # ('type',
         #  'type'): {
         #     str:                        'process_type_str',
@@ -89,6 +152,9 @@ class SearchParametersBuilder(DictTransformationMixin):
 
         return parameters
 
+    def process_view(self, key: str, value: PublicationView) -> str:
+        return ','.join(value.fields)
+
     def process_author_str(self, key: str, value: str) -> str:
         return value
 
@@ -113,23 +179,18 @@ class SearchParametersBuilder(DictTransformationMixin):
     def _join_author_list(cls, authors: List[str]) -> str:
         return " or ".join(authors)
 
-    @classmethod
-    def _assert_valid_year(cls, year: Any):
-        assert (isinstance(year, str)), "year value must be int!"
-        assert (1800 <= year <= 2020), "year value must be a valid int between 1800 and 2020"
-
 
 class SearchBatch:
 
     PUBLICATIONS_FILE_NAME = 'Publikationen.csv'
     ANALYSIS_FILE_NAME = 'Analyse.csv'
 
-    def __init__(self, config: dict, options: dict):
+    def __init__(self, config: dict, options: SearchOptions):
         self.config = config
         self.options = options
 
         self.response = None
-        self.parameter_builder = SearchParametersBuilder()
+        self.success = False
 
         self.publications: List[Publication] = []
         self.length = 0
@@ -140,44 +201,47 @@ class SearchBatch:
 
     def execute(self):
         self.response = self.send_request()
+
         if self.response.status_code == 200:
             temp_dir: TemporaryDirectory = unzip_bytes(self.response.content)
-            publications_file_path: str = os.path.join(temp_dir.name, self.PUBLICATIONS_FILE_NAME)
+            publications_file_path = os.path.join(temp_dir.name, self.PUBLICATIONS_FILE_NAME)
             publications_rows = csv_as_dict_list(publications_file_path)
 
-            self.publications = self._get_publications_from_rows(publications_rows)#
+            self.publications = self._get_publications_from_rows(publications_rows, self.options.view)
             self.length = len(self.publications)
+            self.success = True
         else:
             raise ConnectionError()
 
     def send_request(self) -> requests.Response:
         url = self.config['search_url']
-        parameters = self.get_request_parameters()
+        parameters = self.options.to_parameters()
 
         return requests.get(
             url=url,
             params=parameters
         )
 
-    def get_request_parameters(self):
-        self.parameter_builder.set_options(self.options)
-        return self.parameter_builder.get_parameters()
-
     # PROTECTED METHODS
     # -----------------
 
     @classmethod
-    def _get_publications_from_rows(cls, rows: List[dict]) -> List[Publication]:
+    def _get_publications_from_rows(cls,
+                                    rows: List[Dict[str, Any]],
+                                    publication_view: PublicationView) -> List[Publication]:
         publications = []
 
         for row in rows:
-            _publication = publication_from_row(row)
+            _publication = Publication(row, publication_view)
             publications.append(_publication)
 
         return publications
 
     # MAGIC METHODS
     # -------------
+
+    def __bool__(self):
+        return self.success
 
     def __len__(self) -> int:
         return self.length
@@ -199,11 +263,35 @@ class SearchResult:
 
     def __init__(self, config: dict, options: dict):
         self.config = config
-        self.options = options
+        self._options_dict = options
+        self.options = SearchOptions.from_dict(options)
 
         self.batches = self.create_batches()
         self.length = len(self.batches)
         self.index = 0
+
+    # PUBLIC METHODS
+    # --------------
+
+    def create_batches(self):
+        return self._create_batches(
+            self.config,
+            self.options
+        )
+
+    # PROTECTED METHODS
+    # -----------------
+
+    @classmethod
+    def _create_batches(cls,
+                        config: dict,
+                        options: SearchOptions) -> List[SearchBatch]:
+        strategy_class = config['batching_strategy']
+        strategy = strategy_class(config, options)
+        return strategy()
+
+    # MAGIC METHODS
+    # -------------
 
     def __iter__(self):
         return self
@@ -211,6 +299,7 @@ class SearchResult:
     def __next__(self) -> Publication:
         try:
             batch = self.batches[self.index]
+            if not bool(batch): batch.execute()
             publication = next(batch)
         except StopIteration:
             self.index += 1
@@ -219,31 +308,47 @@ class SearchResult:
                 raise StopIteration
 
             batch = self.batches[self.index]
+            if not bool(batch): batch.execute()
             publication = next(batch)
 
         return publication
 
-    def create_batches(self):
-        return self._create_batches(
-            self.config['batching_strategy'],
-            self.options
-        )
-
-    # CLASS METHODS
-    # -------------
-
-    @classmethod
-    def _create_batches(cls,
-                        strategy_class: Type[BatchingStrategy],
-                        options: dict) -> List[SearchBatch]:
-        strategy = strategy_class({})
-        return strategy(options)
-
 
 class NoBatching(BatchingStrategy):
 
-    def __init__(self, options: dict):
-        super(NoBatching, self).__init__(options)
+    def __init__(self, config: dict, options: SearchOptions):
+        super(NoBatching, self).__init__(config, options)
 
-    def __call__(self, options: dict):
-        return SearchBatch(options)
+    def __call__(self) -> List[SearchBatch]:
+        return [SearchBatch(self.config, self.options)]
+
+
+class YearBatching(BatchingStrategy):
+
+    def __init__(self, config: dict, options: SearchOptions):
+        super(YearBatching, self).__init__(config, options)
+
+        self.now = datetime.datetime.now()
+        self.start = int(self.options.start)
+        self.end = self.now.year if self.options.end == '' else int(self.options.end)
+
+    def __call__(self) -> List[SearchBatch]:
+        batches = []
+        for start, end in self.get_year_tuples():
+            _dict = self.options.to_dict()
+            _dict.update({'start': str(start), 'end': str(end)})
+            print(_dict)
+            options = SearchOptions.from_dict(_dict)
+            batches.append(SearchBatch(self.config, options))
+
+        return batches
+
+    def get_year_tuples(self):
+        result = []
+        current = range(self.start, self.end)
+        following = range(self.start + 1, self.end + 1)
+
+        for start, end in  zip(current, following):
+            result.append((start, end))
+
+        return result

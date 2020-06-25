@@ -14,19 +14,35 @@ pykitopen
         :alt: Documentation Status
 
 
-
-
-A KITOpen wrapper for python
-
+A python wrapper for the *KITOpen* database!
 
 * Free software: MIT license
 * Documentation: https://pykitopen.readthedocs.io.
+
+Usage
+-----
+
+.. code-block::python
+
+    from pykitopen import KitOpen, Publication
+    from pykitopen.config import DEFAULT
+
+    kitopen = KitOpen(DEFAULT)
+    results = kitopen.search({
+        'author':       'MUSTERMANN, MAX',
+        'start':        '2012',
+        'stop':         '2016',
+        'view':         Publication.VIEWS.FULL
+    })
+
+    for publication in results:
+        print(publication.data)
 
 
 Features
 --------
 
-* TODO
+* Searching publications
 
 Credits
 -------

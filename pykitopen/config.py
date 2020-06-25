@@ -1,7 +1,8 @@
 import os
 
-from pykitopen.search import (BatchingStrategy,
-                              NoBatching)
+from pykitopen.search import BatchingStrategy, NoBatching
+from pykitopen.publication import Publication, PublicationView
+
 
 # CONSTANTS
 # ---------
@@ -17,5 +18,9 @@ KITOPEN_SEARCH_URL = os.path.join(KITOPEN_EVALUATION_URL, 'report.php')
 DEFAULT = {
     'batching_strategy':                NoBatching,
     'url':                              KITOPEN_BASE_URL,
-    'search_url':                       KITOPEN_SEARCH_URL
+    'search_url':                       KITOPEN_SEARCH_URL,
+    'default_view':                     Publication.VIEWS.BASIC,
+    'default_author':                   'MUSTERMANN, M*',
+    'default_start':                    '2000',
+    'default_end':                      ''
 }
