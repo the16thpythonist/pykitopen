@@ -22,7 +22,7 @@ A python wrapper for the *KITOpen* database!
 Usage
 -----
 
-.. code-block::python
+.. code:: python
 
     from pykitopen import KitOpen, Publication
     from pykitopen.config import DEFAULT
