@@ -6,3 +6,4 @@ __version__ = '0.1.0'
 
 
 from pykitopen.kitopen import KitOpen
+from pykitopen.publication import Publication
