@@ -19,6 +19,7 @@ DEFAULT = {
     'batching_strategy':                NoBatching,
     'url':                              KITOPEN_BASE_URL,
     'search_url':                       KITOPEN_SEARCH_URL,
+    # DEFAULT VALUES FOR THE SEARCH OPTIONS
     'default_view':                     Publication.VIEWS.BASIC,
     'default_author':                   'MUSTERMANN, M*',
     'default_start':                    '2000',

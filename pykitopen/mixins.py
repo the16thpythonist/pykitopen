@@ -7,6 +7,9 @@ from pykitopen.util import multi_isinstance
 
 class DictTransformationMixin:
 
+    # PROTECTED METHODS
+    # -----------------
+
     def process(self, content: dict):
         result = {}
         for key_tuple, transformations in self.dict_transformation.items():
@@ -27,6 +30,9 @@ class DictTransformationMixin:
 
         return result
 
+    # PROTECTED METHODS
+    # -----------------
+
     def _process_one_to_one(self,
                             content: dict,
                             original_key: Any,
@@ -41,6 +47,8 @@ class DictTransformationMixin:
                 method = getattr(self, method_name)
                 result[transformed_key] = method(original_key, value)
                 break
+        else:
+            self._type_error(original_key, value, transformations.keys())
 
         return result
 
@@ -64,6 +72,8 @@ class DictTransformationMixin:
                     result[key] = value
 
                 break
+        else:
+            self._type_error(original_key, value, transformations.keys())
 
         return result
 
@@ -81,8 +91,19 @@ class DictTransformationMixin:
                 method = getattr(self, method_name)
                 result[transformed_key] = method(original_keys, values)
                 break
+        else:
+            self._type_error(original_keys, values, transformations.keys())
 
         return result
+
+    @classmethod
+    def _type_error(cls, keys, values, valid_types):
+        message = 'The key(s) {} cannot have the value(s) {}! Supported types for a transformation are {}'.format(
+            str(keys),
+            str(values),
+            str(valid_types)
+        )
+        raise TypeError(message)
 
     @staticmethod
     def _get_object_method(obj: object, method_name: str) -> Callable:

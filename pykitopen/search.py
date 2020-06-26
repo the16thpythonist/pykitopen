@@ -10,7 +10,7 @@ import requests
 from tempfile import TemporaryDirectory, TemporaryFile
 from zipfile import ZipFile
 
-from pykitopen.publication import Publication, PublicationView, publication_from_row
+from pykitopen.publication import Publication, PublicationView
 from pykitopen.util import csv_as_dict_list, unzip_bytes
 from pykitopen.mixins import DictTransformationMixin
 

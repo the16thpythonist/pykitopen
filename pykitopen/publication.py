@@ -135,7 +135,7 @@ class Publication:
         ])
 
     def __init__(self, data: dict, view: PublicationView):
-        self.data = data
+        self.data = dict(zip(view.fields, data.values()))
         self.view = view
 
     # PUBLIC METHODS
@@ -149,6 +149,19 @@ class Publication:
 
     def items(self):
         return self.data.items()
+
+    def get_authors(self):
+        assert 'author' in self.keys(), '"author" has to be included in the view to get the list of authors!'
+
+        author_string = self['author']
+        indexed_names = author_string.split('\n')
+        authors = []
+        for indexed_name in indexed_names:
+            last, first = indexed_name.split(', ')
+            author = {'first': first, 'last': last}
+            authors.append(author)
+
+        return authors
 
     # MAGIC METHODS
     # -------------
