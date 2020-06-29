@@ -371,20 +371,52 @@ class SearchBatch:
 
 
 class SearchResult:
+    """
+    This class represents the result of a search action. A `SearchResult` object is in fact returned for every call to
+    the `search` method of the `KitOpen` wrapper.
 
+    Iterator
+    --------
+    The `SearchResult` class implements the necessary methods to act as an iterator, which returns all the publications
+    that have been returned by the class.
+
+    .. code:: python
+
+        from pykitopen import KitOpen
+        from pykitopen.config import DEFAULT
+
+        pykitopen = KitOpen(DEFAULT)
+        results: SearchResult = pykitopen.search()
+
+        for publication in results:
+            print(publication)
+    """
     def __init__(self, config: dict, options: dict):
         self.config = config
+
+        # The options are passed to the search function in the form of a dict, but for further processing down the
+        # search pipeline it is converted to a SearchOptions object, which wraps some important functionality to be
+        # performed on these options
         self._options_dict = options
         self.options = SearchOptions.from_dict(options)
 
-        self.batches = self.create_batches()
+        # The batch objects are the actual instances, which ultimately perform the network request to the server and
+        # also the processing of the response
+        self.batches: List[SearchBatch] = self.create_batches()
         self.length = len(self.batches)
         self.index = 0
 
     # PUBLIC METHODS
     # --------------
 
-    def create_batches(self):
+    def create_batches(self) -> List[SearchBatch]:
+        """
+        Returns a list of SearchBatch objects, which have been created according to the config.
+
+        :return:
+        """
+        # The '_create_batches' is a class method which creates the list of SearchBatch objects according to the
+        # BatchingStrategy defined in the config.
         return self._create_batches(
             self.config,
             self.options
@@ -397,6 +429,16 @@ class SearchResult:
     def _create_batches(cls,
                         config: dict,
                         options: SearchOptions) -> List[SearchBatch]:
+        """
+        Returns a list of SearchBatch objects, which have been created from the passed search options and the
+        BatchingStrategy defined in the config dict.
+
+        :return:
+        """
+        # The 'batching_strategy' field of the config is supposed to contain a class(!) which implements the
+        # BatchingStrategy interface. Objects of this type accept the config and the options as contruction arguments
+        # and can be called directly. This call will return a list of SearchBatch objects, which have been created
+        # from the overall options according to some criterion.
         strategy_class = config['batching_strategy']
         strategy = strategy_class(config, options)
         return strategy()
@@ -408,9 +450,27 @@ class SearchResult:
         return self
 
     def __next__(self) -> Publication:
+        """
+        Returns the next `Publication` object in the list of results from the request, when calling the next() function
+        on the object
+
+        Implementation
+        --------------
+        So the `SearchResult` class is actually not concerned with the actual network request to the database server.
+        It does not contain the list of publications itself. The actual requests are managed by the `SearchBatch`
+        objects. This class only manages a list of all these search batches.
+
+        So the implementation of the iterator works by executing the next search batch at the time, at which it is
+        needed and then for each next() call to the `SearchResult` object itself a next call to the current search
+        batch will return the actual publication, which is then also returned by this method. If the current batch
+        runs out of publications the next one is executed and then set as the current one etc...
+
+        :return:
+        """
         try:
             batch = self.batches[self.index]
-            if not bool(batch): batch.execute()
+            if not bool(batch):
+                batch.execute()
             publication = next(batch)
         except StopIteration:
             self.index += 1
@@ -419,18 +479,33 @@ class SearchResult:
                 raise StopIteration
 
             batch = self.batches[self.index]
-            if not bool(batch): batch.execute()
+            if not bool(batch):
+                batch.execute()
             publication = next(batch)
 
         return publication
 
 
-class NoBatching(BatchingStrategy):
+# DIFFERENT BATCHING STRATEGIES
+# #############################
 
+
+class NoBatching(BatchingStrategy):
+    """
+    Implements the `BatchingStrategy` interface.
+
+    This class defines the most simple batching strategy, which is no batching at all. This strategy will not divide
+    the request at all, it will simply take the search options and create a single SearchBatch object from it.
+    """
     def __init__(self, config: dict, options: SearchOptions):
         super(NoBatching, self).__init__(config, options)
 
     def __call__(self) -> List[SearchBatch]:
+        """
+        Will return a list with a single SearchBatch element, which represents the entire search request.
+
+        :return:
+        """
         return [SearchBatch(self.config, self.options)]
 
 
