@@ -56,8 +56,19 @@ class BatchingStrategy:
 
 
 class SearchOptions:
+    """
+    This class represents the parameters which are passed to the `search` action of the `KitOpen` wrapper.
+
+    The `search` method itself expects a dict to be passed to it to define the options for the search, but this dict
+    is then converted internally to a `SearchOptions` object, as it wraps some important functionality to be executed
+    on these options.
+    """
+
+    # CLASS CONSTANTS
+    # ---------------
 
     _ARGS = ['author', 'start', 'end', 'view']
+    """A list of the string keys, which are possible to pass as options"""
 
     _DEFAULT_CONFIG = {
         'default_view':         Publication.VIEWS.BASIC,
@@ -71,21 +82,49 @@ class SearchOptions:
                  start: str,
                  end: str,
                  view: PublicationView):
+        """
+        The constructor.
+
+        Design Choice
+        -------------
+        I have made the design choice to make the constructor of this object expect every possible search option as a
+        positional argument explicitly, instead of having the constructor accept the dict. The primary way to create
+        this object will still be using the "from_dict" class method, which does exactly as it sounds, but by defining
+        the arguments explicitly, it is more concise and obvious right away what the search options actually includes.
+
+        :param author:
+        :param start:
+        :param end:
+        :param view:
+        """
         self.author = author
         self.start = start
         self.end = end
         self.view = view
 
+        # The SearchParametersBuilder is the object which manages the construction of the dict, which will then be
+        # used as the GET parameters for the actual network request from the simplified options passed to the search
+        # method of the wrapper.
         self.parameters_builder = SearchParametersBuilder()
         self.parameters_builder.set_options(self.to_dict())
 
     # PUBLIC METHODS
     # --------------
 
-    def to_parameters(self):
+    def to_parameters(self) -> Dict[str, Any]:
+        """
+        Returns the dict, which is used as the GET parameters for the actual network request to the database
+
+        :return:
+        """
         return self.parameters_builder.get_parameters()
 
     def to_dict(self) -> Dict[str, Any]:
+        """
+        Returns the search options as a dict
+
+        :return:
+        """
         return {
             'author':       self.author,
             'start':        self.start,
@@ -95,6 +134,17 @@ class SearchOptions:
 
     @classmethod
     def from_dict(cls, data: dict, config: dict = _DEFAULT_CONFIG):
+        """
+        Creates a new `SearchOptions` object from the given data dict and an optional config.
+
+        The config is also part of creating the dict, because it has to be possible to also supply an options dict to
+        the `search` method which only contains a subset of all possible options. All the missing options are then
+        substituted by their default values. And those default values can be customized within the config...
+
+        :param data:
+        :param config:
+        :return:
+        """
         kwargs = {}
         for key in cls._ARGS:
             default_key = f'default_{key}'
