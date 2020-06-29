@@ -26,7 +26,7 @@ The package is best installed using pip, as it will also install all the necessa
 
 .. code:: console
 
-    pip install pykitopen
+    $ pip install pykitopen
 
 Usage
 -----

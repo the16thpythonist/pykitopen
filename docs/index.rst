@@ -9,7 +9,6 @@ Welcome to pykitopen's documentation!
    installation
    usage
    modules
-   contributing
    authors
    history
 
