@@ -1,3 +1,8 @@
+"""
+The module, which contains all the classes which are directly concerned with the search action.
+
+This includes the classes SearchResult, SearchBatch, SearchOptions and the batching strategies
+"""
 import os
 import csv
 import json
@@ -19,12 +24,34 @@ from pykitopen.mixins import DictTransformationMixin
 
 
 class BatchingStrategy:
+    """
+    This is the interface for request batching strategy. A BatchingStrategy object acts as a function, by having to
+    implement the __call__ method. This call method has to return a list of SearchBatch objects. A batching strategy
+    is constructed by passing the config dict of the overall configuration for the KitOpen wrapper as well as the
+    options dict, which defines the parameters for a single search action.
+
+    Background
+    ----------
+    So what is a batching strategy even doing in the broader context of the whole package and why is it important?
+    For the requests to the KITOpen database it is important, that there is a functionality, which breaks down request
+    for large amounts of data into smaller individual request, because for large requests there is the chance that the
+    server will take way to long thus running the request into a timeout.
+
+    So the search batching strategies are classes, which essentially represent different methods of dividing a big
+    request into smaller requests.
+    """
 
     def __init__(self, config, options):
         self.options = options
         self.config = config
 
     def __call__(self):
+        """
+        Returns a list of SearchBatch objects, which have been created according to the described strategy from the
+        basic "options" dict passed to this object
+
+        :return: List[SearchBatch]
+        """
         raise NotImplementedError()
 
 
@@ -181,6 +208,39 @@ class SearchParametersBuilder(DictTransformationMixin):
 
 
 class SearchBatch:
+    """
+    The SearchBatch class represents one of the parts of a search request to the KITOpen database. The SearchBatch
+    objects are the actual lowest layer of abstraction, which actually execute the network request to the database and
+    handle the processing of the response.
+
+    Processing the response
+    -----------------------
+
+    The response, which is returned by the KITOpen database is a little bit different than the usual REST API. KITOpen
+    has chosen to only export the detailed publication data in the form of a ZIP file, which in turn contains a CSV,
+    which actually contains the data. Thus the reponse has to be processed by first unpacking the downloaded ZIP file
+    into a temp folder and then parsing the CSV for the data.
+
+    Iterator
+    --------
+    The SearchBatch class implements the magic methods to act as an iterator, which will simply return all the
+    `Publication` objects, which have been processed from the response of the request
+
+    .. code:: python
+
+        batch = SearchBatch(config, options)
+        batch.execute()
+        for publication in batch:
+            print(publication)
+
+    """
+
+    # CLASS CONSTANTS
+    # ---------------
+
+    # These constants define the names of the files, which are contained within the zip file, which is returned as a
+    # response of the KITOpen server. These file names are always the same and have to be known to read the files for
+    # the data they contain
 
     PUBLICATIONS_FILE_NAME = 'Publikationen.csv'
     ANALYSIS_FILE_NAME = 'Analyse.csv'
@@ -192,6 +252,8 @@ class SearchBatch:
         self.response = None
         self.success = False
 
+        # Setting up the helper variables for the iterator functionality. A list, which will actually hold all the
+        # publications, the total length of that list and the current index of the iteration.
         self.publications: List[Publication] = []
         self.length = 0
         self.index = 0
@@ -200,21 +262,44 @@ class SearchBatch:
     # --------------
 
     def execute(self):
+        """
+        Actually executes the search batch, by sending the request to the server and processing the response
+
+        :raises ConnectionError: In case anything with the request went wrong
+
+        :return:
+        """
         self.response = self.send_request()
 
         if self.response.status_code == 200:
+            # The 'unzip_bytes' function takes the binary string, which represents a ZIP file unzips the content of
+            # this file into a TemporaryDictionary and then returns the object, which describes this temp folder
             temp_dir: TemporaryDirectory = unzip_bytes(self.response.content)
+
+            # The function "csv_as_dict_list" does exactly how it sounds it takes the path of a csv file and returns
+            # a list of dicts, where each dict represents a single row in the csv file, the keys being the headers
+            # of the scv rows.
             publications_file_path = os.path.join(temp_dir.name, self.PUBLICATIONS_FILE_NAME)
             publications_rows = csv_as_dict_list(publications_file_path)
 
             self.publications = self._get_publications_from_rows(publications_rows, self.options.view)
+
             self.length = len(self.publications)
             self.success = True
         else:
             raise ConnectionError()
 
     def send_request(self) -> requests.Response:
+        """
+        This method actually sends the request to the KITOpen server and returns the response.
+
+        :return: requests.Response
+        """
+        # The url of the KITOpen server is defined as part of the overall config dict
         url = self.config['search_url']
+
+        # The parameters for the GET request to the server are directly derived from the options dict passed to the
+        # search action. The ".to_parameter" method performs this conversion.
         parameters = self.options.to_parameters()
 
         return requests.get(
@@ -229,6 +314,15 @@ class SearchBatch:
     def _get_publications_from_rows(cls,
                                     rows: List[Dict[str, Any]],
                                     publication_view: PublicationView) -> List[Publication]:
+        """
+        Given a list of dicts, where each dict describes a publication and the PublicationView object, which was used
+        to retrieve these publications, this method will return a list of Publication objects, which contain the data
+        from the dicts and the keys according to the given view.
+
+        :param rows:
+        :param publication_view:
+        :return:
+        """
         publications = []
 
         for row in rows:
@@ -241,6 +335,11 @@ class SearchBatch:
     # -------------
 
     def __bool__(self):
+        """
+        The boolean state of this object evaluates to whether or not the request was successful
+
+        :return:
+        """
         return self.success
 
     def __len__(self) -> int:
@@ -250,6 +349,18 @@ class SearchBatch:
         return self
 
     def __next__(self) -> Publication:
+        """
+        This method implements the functionality of being able to iterate a SearchBatch object.
+
+        For each call to the next function this will simply go through the internal list of publications.
+
+        :raises AssertionError: If the request to the server was not successful
+
+        :return:
+        """
+        assert self.response is not None, "The batch has to be executed first, before it can be iterated"
+        assert self.success, "The search request has to be successful to be iterated"
+
         publication = self.publications[self.index]
         self.index += 1
 
