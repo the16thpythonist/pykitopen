@@ -560,12 +560,18 @@ class NoBatching(BatchingStrategy):
 
 
 class YearBatching(BatchingStrategy):
+    """
+    Implements the `BatchingStrategy` Interface
 
+    This class defines a batching strategy, which will divide the search options by the individual years, which are
+    included in the search. A SearchBatch will be created for each year within the given time span.
+    """
     def __init__(self, config: dict, options: SearchOptions):
         super(YearBatching, self).__init__(config, options)
 
         self.now = datetime.datetime.now()
         self.start = int(self.options.start)
+
         self.end = self.now.year if self.options.end == '' else int(self.options.end)
 
     def __call__(self) -> List[SearchBatch]:
